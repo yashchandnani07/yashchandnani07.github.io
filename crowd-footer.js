@@ -13,6 +13,7 @@
 
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   let paused = false, visible = false, ready = false;
+  let look = 0, lookTarget = 0, clock = 0, cursorX = -1;
   let W = 0, H = 0, dpr = 1, time = 0, last = 0, raf = 0, maxW = 0, span = 0, people = [];
 
   const rnd = (n) => { const t = 43758.5453 * Math.sin(127.1 * n + 311.7); return t - Math.floor(t); };
@@ -31,16 +32,34 @@
       const bob = (1 - Math.cos((time * p.speed + 10 * p.phase) * Math.PI * 4)) * 5;
       const f = SCALE[s];
       const c = ctxs[p.layer];
+      // "noticed you": stagger a quick turn-flip + hop, then lean toward the cursor
+      const u = Math.min(1, Math.max(0, look * 1.5 - p.d));
+      const attn = u * u * (3 - 2 * u);
+      const sq = Math.abs(Math.cos(Math.PI * u));
+      const hop = Math.sin(Math.PI * u) * 16;
+      const breath = Math.sin(clock * 3 + p.phase * 20) * 2 * attn;
+      const cx = cursorX < 0 ? W / 2 : cursorX;
+      const lean = Math.max(-1, Math.min(1, (cx - x) / (W * 0.5))) * 0.07 * attn;
+      const grow = 1 + 0.04 * attn;
       c.save();
-      c.translate(x, p.baseline + p.h * (1 - f) - bob);
-      c.scale(p.direction, 1);
+      c.translate(x, p.baseline + p.h * (1 - f) - bob * (1 - attn) - hop - breath);
+      c.translate(0, p.h * f);
+      c.rotate(lean);
+      c.scale(p.direction * sq * grow, grow);
+      c.translate(0, -p.h * f);
       c.drawImage(sheet, (k % 5) * cw, Math.floor(k / 5) * ch, cw, ch, (-p.w * f) / 2, 0, p.w * f, p.h * f);
       c.restore();
     }
   }
 
   function tick(now) {
-    if (last) time += Math.min((now - last) / 1000, 0.05);
+    if (last) {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      look = Math.min(1, Math.max(0, look + (lookTarget ? dt / 0.9 : -dt / 0.7)));
+      const sm = look * look * (3 - 2 * look);
+      time += dt * (1 - sm); // everyone slows to a stop while you hover
+      clock += dt;
+    }
     last = now;
     draw();
     raf = requestAnimationFrame(tick);
@@ -80,6 +99,7 @@
         h: h2, w: 0.8 * h2, baseline,
         speed: [0.7, 1.05][row] * SPEED * (0.88 + 0.24 * rnd(t + 97)),
         phase: (i + 0.85 * rnd(t + 41)) / count,
+        d: rnd(t + 13) * 0.5,
         direction: row === 1 ? -1 : 1,
       };
     }).sort((a, b) => a.baseline - b.baseline);
@@ -96,6 +116,11 @@
     scene.setAttribute("aria-label", paused ? "YASH. Resume crowd animation" : "YASH. Pause crowd animation");
     sync();
   });
+  // hover: the crowd notices you
+  const footer = scene; // only the blue crowd scene reacts
+  footer.addEventListener("pointerenter", () => { if (!reduced.matches) lookTarget = 1; });
+  footer.addEventListener("pointerleave", () => { lookTarget = 0; cursorX = -1; });
+  footer.addEventListener("pointermove", (e) => { cursorX = e.clientX - scene.getBoundingClientRect().left; });
   reduced.addEventListener("change", sync);
   document.addEventListener("visibilitychange", sync);
   new IntersectionObserver((e) => { visible = e[0].isIntersecting; sync(); }, { rootMargin: "80px" }).observe(scene);
